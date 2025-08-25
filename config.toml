@@ -1,0 +1,22 @@
+[server]
+host = "127.0.0.1"
+port = 8730
+
+[security]
+# si non vide, exige ?token=...
+token = ""
+# kill switch initial (false = autorisé)
+disabled = false
+
+[features]
+mouse = true
+keyboard = true
+window = true
+screenshot = true
+run_apps = true
+browser_open = true
+browser_playwright = true  # passe à true si tu as installé Playwright
+
+[run.allowlist]
+calc = ["calc.exe"]
+notepad = ["notepad.exe"]
