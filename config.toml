@@ -3,9 +3,7 @@ host = "127.0.0.1"
 port = 8730
 
 [security]
-# si non vide, exige ?token=...
-token = ""
-# kill switch initial (false = autorisé)
+token = "dfsgfygfhdgfh7441ggfd/gfdg-gfdgjki2fs-f5f/f1d5f1"
 disabled = false
 
 [features]
@@ -15,8 +13,12 @@ window = true
 screenshot = true
 run_apps = true
 browser_open = true
-browser_playwright = true  # passe à true si tu as installé Playwright
+browser_playwright = false   # passe à true si tu veux utiliser Playwright (install requis)
 
 [run.allowlist]
-calc = ["calc.exe"]
 notepad = ["notepad.exe"]
+chrome  = ["C:\\Programmes\\Google\\Chrome\\Application\\chrome.exe"]
+vscode  = ["C:\\Users\\horne\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"]
+word    = ["C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE"]
+excel   = ["C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE"]
+# ajoute ici d’autres applis : spotify, discord, etc.
