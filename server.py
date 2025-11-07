@@ -1,9 +1,15 @@
-import os, subprocess, shutil, re, asyncio
+import logging
+import os
+import re
+import subprocess
+import shutil
+import asyncio
 from pathlib import Path
-from typing import Optional, List, Literal
+from typing import Dict, Iterable, List, Literal, Optional, Tuple
+
 import tomllib
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Query, HTTPException, Body
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 import uvicorn
 from pydantic import BaseModel, Field
@@ -13,16 +19,107 @@ import mss
 from pywinauto import Desktop
 import pyperclip
 
+load_dotenv()
+
 # ================== Config & Paths ==================
 ROOT = Path(__file__).parent
-CFG = tomllib.loads((ROOT / 'config.toml').read_text(encoding='utf-8'))
 
-HOST = CFG['server']['host']
-PORT = int(CFG['server']['port'])
-TOKEN = (CFG.get('security', {}).get('token') or "").strip()
-DISABLED = bool(CFG.get('security', {}).get('disabled', False))
-FEAT = CFG.get('features', {})
+
+def _resolve_config_path() -> Tuple[Path, Optional[str]]:
+    """Return the config file path and a warning message if we fall back."""
+    default_path = ROOT / "config.toml"
+    raw = os.getenv("COPILOTPC_CONFIG")
+    if not raw:
+        return default_path, None
+
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        candidate = (ROOT / raw).resolve()
+
+    if candidate.exists():
+        return candidate, None
+
+    if default_path.exists():
+        warn = f"Config path '{raw}' not found, falling back to {default_path}"
+        return default_path, warn
+
+    raise FileNotFoundError(
+        f"Unable to locate configuration file. Tried '{raw}' and '{default_path}'."
+    )
+
+
+CONFIG_PATH, _config_warning = _resolve_config_path()
+CFG = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _feature_overrides(base: Dict[str, bool]) -> Dict[str, bool]:
+    updated: Dict[str, bool] = {k: bool(v) for k, v in base.items()}
+    prefix = "COPILOTPC_FEATURE_"
+    for key in list(updated.keys()):
+        env_key = f"{prefix}{key.upper()}"
+        if os.getenv(env_key) is not None:
+            updated[key] = _env_bool(env_key, updated[key])
+    # allow forcing features even if missing from config
+    for env_key, value in os.environ.items():
+        if not env_key.startswith(prefix):
+            continue
+        feature = env_key[len(prefix):].lower()
+        if feature not in updated:
+            updated[feature] = _env_bool(env_key, False)
+    return updated
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logging.warning("Invalid value '%s' for %s, falling back to %s", raw, name, default)
+        return default
+
+
+HOST = os.getenv("COPILOTPC_HOST", CFG["server"]["host"])
+PORT = _env_int("COPILOTPC_PORT", int(CFG["server"]["port"]))
+TOKEN = (os.getenv("COPILOTPC_TOKEN") or CFG.get('security', {}).get('token') or "").strip()
+DISABLED = _env_bool("COPILOTPC_DISABLED", bool(CFG.get('security', {}).get('disabled', False)))
+FEAT = _feature_overrides(CFG.get('features', {}))
 ALLOW = CFG.get('run', {}).get('allowlist', {})
+
+
+def _collect_feature_env() -> Dict[str, str]:
+    prefix = "COPILOTPC_FEATURE_"
+    return {
+        key[len(prefix):].lower(): value
+        for key, value in os.environ.items()
+        if key.startswith(prefix)
+    }
+
+
+FEATURE_ENV = _collect_feature_env()
+
+
+def _normalize_allowlist(raw: Dict[str, Iterable[str]]) -> Dict[str, List[str]]:
+    normalized: Dict[str, List[str]] = {}
+    for name, value in (raw or {}).items():
+        if isinstance(value, str):
+            normalized[name] = [value]
+        elif isinstance(value, Iterable):
+            normalized[name] = [str(item) for item in value]
+        else:
+            logging.warning("Ignore allowlist entry %s: unsupported type %s", name, type(value))
+    return normalized
+
+
+ALLOW = _normalize_allowlist(ALLOW)
 
 STATIC = ROOT / "static"
 SHOTS = ROOT / 'shots'
@@ -31,7 +128,6 @@ SHOTS.mkdir(exist_ok=True)
 app = FastAPI(title="CopilotPC Lite", version="0.4")
 
 # ================== Logging ==================
-import logging
 from datetime import datetime
 
 LOGFILE = ROOT / "copilotpc.log"
@@ -44,6 +140,10 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+if _config_warning:
+    logging.warning(_config_warning)
+logging.info("Using configuration file at %s", CONFIG_PATH)
 
 def log_event(event: str, detail=None):
     msg = event
@@ -127,6 +227,24 @@ def panic():
 def enable():
     global DISABLED; DISABLED = False
     return {"status":"ok","disabled":False}
+
+
+@app.get("/status")
+def status(request: Request):
+    auth(request)
+    return {
+        "status": "ok",
+        "host": HOST,
+        "port": PORT,
+        "disabled": DISABLED,
+        "token_configured": bool(TOKEN),
+        "features": FEAT,
+        "feature_env": FEATURE_ENV,
+        "allowlist": sorted(ALLOW.keys()),
+        "playwright_enabled": bool(FEAT.get('browser_playwright', False)),
+        "config_path": str(CONFIG_PATH),
+        "version": app.version,
+    }
 
 # OS: mouse / keyboard / clipboard
 @app.get("/os/mouse/move")
