@@ -1,16 +1,22 @@
 # agent_llm.py
 import os, json, httpx
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE = os.getenv("OPENAI_BASE", "https://api.openai.com/v1")
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")  # rapide et bon pour tool-calling
+DEFAULT_BASE_URL = os.getenv("COPILOTPC_BASE_URL", "http://127.0.0.1:8730")
+DEFAULT_TOKEN = os.getenv("COPILOTPC_TOKEN", "")
 
 class LLMPlanner:
     """
     Transforme une demande NL -> suite d'appels d'outils CopilotPC.
     Utilise OpenAI Responses API + Tool Calling.
     """
-    def __init__(self, base_url="http://127.0.0.1:8730", token=""):
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, token: str = DEFAULT_TOKEN):
         self.base = base_url.rstrip("/")
         self.token = token
 
@@ -56,6 +62,14 @@ class LLMPlanner:
             {
                 "type":"function",
                 "function":{
+                    "name":"paste_text",
+                    "description":"Colle un texte (UTF-8/multi-lignes) via presse-papier dans la fenêtre active.",
+                    "parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}
+                }
+            },
+            {
+                "type":"function",
+                "function":{
                     "name":"hotkey",
                     "description":"Envoyer une combinaison de touches (ex: 'ctrl+l', 'ctrl+enter').",
                     "parameters":{"type":"object","properties":{"keys":{"type":"string"}},"required":["keys"]}
@@ -81,6 +95,13 @@ class LLMPlanner:
             r.raise_for_status()
             return r.json()
 
+    @staticmethod
+    def _needs_clipboard(text: str) -> bool:
+        multiline = ("\n" in text) or ("\r" in text)
+        too_long = len(text) > 300
+        has_non_ascii = any(ord(c) > 127 for c in text)
+        return multiline or too_long or has_non_ascii
+
     async def tool_dispatch(self, name, args):
         if name == "run_app":
             return await self._call_local("/app/run", {"name": args["name"]})
@@ -89,8 +110,19 @@ class LLMPlanner:
         if name == "open_url":
             return await self._call_local("/browser/open", {"url": args["url"]})
         if name == "type_text":
-            # support \n, \t, etc.
-            return await self._call_local("/os/keyboard/type", {"text": args["text"]})
+            txt = args.get("text")
+            if not isinstance(txt, str) or not txt.strip():
+                return {"ok": False, "status": 400, "error": "missing_text_argument"}
+            if self._needs_clipboard(txt):
+                return await self.tool_dispatch("paste_text", {"text": txt})
+            return await self._call_local("/os/keyboard/type", {"text": txt})
+        if name == "paste_text":
+            txt = args.get("text")
+            if not isinstance(txt, str) or not txt.strip():
+                return {"ok": False, "status": 400, "error": "missing_text_argument"}
+            clip = await self._call_local("/os/clipboard/set", {"text": txt})
+            paste = await self._call_local("/os/keyboard/paste")
+            return {"ok": True, "clipboard": clip, "paste": paste}
         if name == "hotkey":
             return await self._call_local("/os/keyboard/hotkey", {"keys": args["keys"]})
         if name == "screenshot":
