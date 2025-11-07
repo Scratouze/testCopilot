@@ -15,8 +15,18 @@ python server.py
 ```
 UI/API locale: http://127.0.0.1:8730
 
+### Configuration rapide
+- L'application charge automatiquement un fichier `.env` (grâce à `python-dotenv`).
+- Variables disponibles :
+  - `COPILOTPC_HOST` / `COPILOTPC_PORT`
+  - `COPILOTPC_TOKEN` (prioritaire sur `config.toml`)
+  - `COPILOTPC_DISABLED` (met le mode panic à `true` au démarrage)
+  - `COPILOTPC_BASE_URL` (pour le planner LLM)
+  - `COPILOTPC_FEATURE_<NOM>` pour surcharger `features` du `config.toml` (ex: `COPILOTPC_FEATURE_MOUSE=false`).
+  - `COPILOTPC_CONFIG` pour pointer vers un autre fichier TOML (chemin absolu ou relatif au dossier du serveur).
+
 ## Sécurité
-- Par défaut: **local only** (127.0.0.1). 
+- Par défaut: **local only** (127.0.0.1).
 - Mets un `TOKEN` dans `server.py` pour exiger `?token=...`.
 - Allowlist d'apps dans `config.toml` (section [run.allowlist]).
 - Endpoints OS sensibles sont activables/désactivables par flags dans `config.toml`.
@@ -33,6 +43,7 @@ UI/API locale: http://127.0.0.1:8730
 
 **Écran**
 - `GET /screen/screenshot`  (retour JSON avec chemin + sert l'image à `/shots/<file>`)
+- `GET /status` (nécessite le token si configuré) pour vérifier les features actifs, le chemin de config chargé et l'état du serveur.
 
 **Apps (allowlist)**
 - `GET /app/run?name=calc`  (voir `[run.allowlist]` dans `config.toml`)
