@@ -270,6 +270,7 @@ def cb_set(request: Request, text: str = Query("")):
 @app.get("/os/keyboard/paste")
 def kb_paste(request: Request):
     auth(request); require_enabled()
+    if not FEAT.get('keyboard',True): raise HTTPException(403,"keyboard disabled")
     pyautogui.hotkey('ctrl', 'v')
     return {"status":"ok","action":"paste"}
 
