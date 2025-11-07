@@ -6,3 +6,4 @@ mss==9.0.1
 pillow==10.3.0
 pywinauto==0.6.8
 python-dotenv==1.0.1
+pytest==8.2.2
